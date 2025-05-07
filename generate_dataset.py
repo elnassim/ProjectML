@@ -162,12 +162,11 @@ def generate_revenu_annuel(df):
 
     revenus = np.zeros(len(df))
 
-    # Urbain : réduction du sigma pour obtenir ~66% sous la moyenne (au lieu de ~71%)
-    urbain_mu, urbain_sigma = np.log(7800), 0.70  # Réduit de 0.85 à 0.70
-    revenus_urbains = np.random.lognormal(mean=urbain_mu, sigma=urbain_sigma, size=sum(urbain_mask))
+    # Ajustement des paramètres sigma pour viser les contraintes de répartition
+    urbain_mu, urbain_sigma = np.log(7300), 0.45  # Ajusté pour cible 65.9%
+    rural_mu, rural_sigma = np.log(2000), 2.11  # Ajusté pour cible 85.4%
 
-    # Rural : augmentation du sigma pour atteindre ~85% sous la moyenne (au lieu de ~82%)
-    rural_mu, rural_sigma = np.log(2000), 2.0  # Augmenté de 1.8 à 2.0
+    revenus_urbains = np.random.lognormal(mean=urbain_mu, sigma=urbain_sigma, size=sum(urbain_mask))
     revenus_ruraux = np.random.lognormal(mean=rural_mu, sigma=rural_sigma, size=sum(rural_mask))
 
     revenus[urbain_mask] = revenus_urbains
@@ -343,24 +342,26 @@ def generate_dataset():
     # Valeurs Aberrantes (après génération et NaN, pour ne pas écraser trop de NaN)
     data = add_valeurs_aberrantes(data)
     
-    # NOUVEAU: Ajustement final des moyennes APRÈS l'ajout des valeurs aberrantes
+    # Ajustement final des moyennes APRÈS l'ajout des valeurs aberrantes
     urbain_mask = data['Milieu'] == 'Urbain'
     rural_mask = ~urbain_mask
     
-    urbain_data = data.loc[urbain_mask, 'Revenu_Annuel'].dropna()
-    rural_data = data.loc[rural_mask, 'Revenu_Annuel'].dropna()
+    urbain_revenus_actuels = data.loc[urbain_mask, 'Revenu_Annuel'].dropna()
+    rural_revenus_actuels = data.loc[rural_mask, 'Revenu_Annuel'].dropna()
     
-    if not urbain_data.empty:
-        mean_urbain = urbain_data.mean()
-        factor_urbain = REVENU_ANNUEL_MOYEN_URBAIN_CIBLE / mean_urbain
-        data.loc[urbain_mask, 'Revenu_Annuel'] = (data.loc[urbain_mask, 'Revenu_Annuel'] * factor_urbain).round(0)
+    if not urbain_revenus_actuels.empty:
+        mean_urbain_actuel = urbain_revenus_actuels.mean()
+        if mean_urbain_actuel != 0 and pd.notna(mean_urbain_actuel):
+            factor_urbain = REVENU_ANNUEL_MOYEN_URBAIN_CIBLE / mean_urbain_actuel
+            data.loc[urbain_mask & data['Revenu_Annuel'].notna(), 'Revenu_Annuel'] *= factor_urbain
     
-    if not rural_data.empty:
-        mean_rural = rural_data.mean()
-        factor_rural = REVENU_ANNUEL_MOYEN_RURAL_CIBLE / mean_rural
-        data.loc[rural_mask, 'Revenu_Annuel'] = (data.loc[rural_mask, 'Revenu_Annuel'] * factor_rural).round(0)
+    if not rural_revenus_actuels.empty:
+        mean_rural_actuel = rural_revenus_actuels.mean()
+        if mean_rural_actuel != 0 and pd.notna(mean_rural_actuel):
+            factor_rural = REVENU_ANNUEL_MOYEN_RURAL_CIBLE / mean_rural_actuel
+            data.loc[rural_mask & data['Revenu_Annuel'].notna(), 'Revenu_Annuel'] *= factor_rural
     
-    # Réajuster Revenu_Mensuel après l'ajustement final des moyennes
+    data['Revenu_Annuel'] = data['Revenu_Annuel'].round(0)
     data['Revenu_Mensuel'] = (data['Revenu_Annuel'] / 12).round(2)
     
     # Vérification finale de cohérence pour Annees_experience vs Age
@@ -392,130 +393,8 @@ if __name__ == "__main__":
     print(f"Génération de {N_RECORDS} enregistrements...")
     dataset = generate_dataset()
     
-    # --- Vérifications Statistiques Détaillées ---
-    print("\n--- Vérifications Statistiques Détaillées ---")
-
-    # 1. Revenus Annuels Moyens
-    print("\n1. Revenus Annuels Moyens :")
-    mean_global_ds = dataset['Revenu_Annuel'].mean()
-    print(f"  - Global (Dataset): {mean_global_ds:.0f} DH (Cible: {REVENU_ANNUEL_MOYEN_GLOBAL_CIBLE} DH)")
-
-    urbain_ds = dataset[dataset['Milieu'] == 'Urbain']['Revenu_Annuel'].dropna()
-    rural_ds = dataset[dataset['Milieu'] == 'Rural']['Revenu_Annuel'].dropna()
-
-    if not urbain_ds.empty:
-        mean_urbain_ds = urbain_ds.mean()
-        print(f"  - Urbain (Dataset): {mean_urbain_ds:.0f} DH (Cible: {REVENU_ANNUEL_MOYEN_URBAIN_CIBLE} DH)")
-    else:
-        print("  - Urbain (Dataset): N/A (pas de données urbaines)")
-
-    if not rural_ds.empty:
-        mean_rural_ds = rural_ds.mean()
-        print(f"  - Rural (Dataset): {mean_rural_ds:.0f} DH (Cible: {REVENU_ANNUEL_MOYEN_RURAL_CIBLE} DH)")
-    else:
-        print("  - Rural (Dataset): N/A (pas de données rurales)")
-
-    # 2. Répartition des Revenus (Inférieurs à la moyenne respective)
-    print("\n2. Répartition des Revenus (Inférieurs à la moyenne respective) :")
-    pct_inf_moy_global = (dataset['Revenu_Annuel'] < mean_global_ds).mean() * 100
-    print(f"  - Global (Dataset): {pct_inf_moy_global:.1f}% (Cible: 71.8%)")
-    
-    if not urbain_ds.empty:
-        pct_inf_moy_urbain = (urbain_ds < mean_urbain_ds).mean() * 100
-        print(f"  - Urbain (Dataset): {pct_inf_moy_urbain:.1f}% (Cible: 65.9%)")
-
-    if not rural_ds.empty:
-        pct_inf_moy_rural = (rural_ds < mean_rural_ds).mean() * 100
-        print(f"  - Rural (Dataset): {pct_inf_moy_rural:.1f}% (Cible: 85.4%)")
-
-    # 3. Statistiques Descriptives du Revenu Annuel Global
-    print("\n3. Statistiques Descriptives du Revenu Annuel (Global) :")
-    print(dataset['Revenu_Annuel'].describe(percentiles=[.1, .25, .5, .75, .9]).round(0))
-    print(f"  Skewness: {dataset['Revenu_Annuel'].skew():.2f}")
-    print(f"  Kurtosis: {dataset['Revenu_Annuel'].kurtosis():.2f}")
-    median_global_ds = dataset['Revenu_Annuel'].median()
-    print(f"  Mean/Median Ratio: {(mean_global_ds / median_global_ds):.2f}")
-
-    # 3b. Statistiques Descriptives du Revenu Annuel (Urbain)
-    print("\n3b. Statistiques Descriptives du Revenu Annuel (Urbain) :")
-    if not urbain_ds.empty:
-        print(urbain_ds.describe(percentiles=[.1, .25, .5, .75, .9]).round(0))
-        print(f"  Skewness: {urbain_ds.skew():.2f}")
-        print(f"  Kurtosis: {urbain_ds.kurtosis():.2f}")
-        median_urbain_ds = urbain_ds.median()
-        print(f"  Mean/Median Ratio: {(mean_urbain_ds / median_urbain_ds):.2f}")
-    else:
-        print("  N/A (pas de données urbaines)")
-
-    # 3c. Statistiques Descriptives du Revenu Annuel (Rural)
-    print("\n3c. Statistiques Descriptives du Revenu Annuel (Rural) :")
-    if not rural_ds.empty:
-        print(rural_ds.describe(percentiles=[.1, .25, .5, .75, .9]).round(0))
-        print(f"  Skewness: {rural_ds.skew():.2f}")
-        print(f"  Kurtosis: {rural_ds.kurtosis():.2f}")
-        median_rural_ds = rural_ds.median()
-        print(f"  Mean/Median Ratio: {(mean_rural_ds / median_rural_ds):.2f}")
-    else:
-        print("  N/A (pas de données rurales)")
-
-    # 4. Revenu Annuel Moyen par Sexe
-    print("\n4. Revenu Annuel Moyen par Sexe :")
-    print(dataset.groupby('Sexe')['Revenu_Annuel'].mean().round(0))
-
-    # 5. Revenu Annuel Moyen par Niveau d'Éducation
-    print("\n5. Revenu Annuel Moyen par Niveau d'Éducation :")
-    ordered_edu = [edu for edu in NIVEAU_EDUCATION_OPTS if edu in dataset['Niveau_education'].unique()]
-    if ordered_edu:
-        print(dataset.groupby('Niveau_education')['Revenu_Annuel'].mean().reindex(ordered_edu).round(0))
-    else:
-        print("N/A (colonne Niveau_education manquante ou vide)")
-
-    # 6. Corrélation Âge et Revenu Annuel
-    print("\n6. Corrélation Âge et Revenu Annuel :")
-    if 'Age' in dataset.columns and 'Revenu_Annuel' in dataset.columns:
-        age_revenu_corr = dataset[['Age', 'Revenu_Annuel']].corr().iloc[0, 1]
-        print(f"  - Corrélation Pearson: {age_revenu_corr:.2f}")
-    else:
-        print("  - N/A (colonnes Age ou Revenu_Annuel manquantes)")
-
-    # 7. Corrélation Années d'Expérience et Revenu Annuel
-    print("\n7. Corrélation Années d'Expérience et Revenu Annuel :")
-    if 'Annees_experience' in dataset.columns and 'Revenu_Annuel' in dataset.columns:
-        exp_revenu_corr = dataset[['Annees_experience', 'Revenu_Annuel']].dropna().corr().iloc[0, 1]
-        print(f"  - Corrélation Pearson (NaN exclus): {exp_revenu_corr:.2f}")
-    else:
-        print("  - N/A (colonnes Annees_experience ou Revenu_Annuel manquantes)")
-
-    # 8. Revenu Annuel Moyen par CSP
-    print("\n8. Revenu Annuel Moyen par CSP :")
-    ordered_csp = [csp for csp in CSP_OPTS if csp in dataset['CSP'].unique()]
-    if ordered_csp:
-        print(dataset.groupby('CSP')['Revenu_Annuel'].mean().reindex(ordered_csp).round(0).sort_values(ascending=False))
-    else:
-        print("N/A (colonne CSP manquante ou vide)")
-
-    # 9. Revenu Annuel Moyen par Région Géographique
-    print("\n9. Revenu Annuel Moyen par Région Géographique :")
-    ordered_regions = [region for region in REGION_GEO_OPTS if region in dataset['Region_geographique'].unique()]
-    if ordered_regions:
-        print(dataset.groupby('Region_geographique')['Revenu_Annuel'].mean().reindex(ordered_regions).round(0).sort_values(ascending=False))
-    else:
-        print("N/A (colonne Region_geographique manquante ou vide)")
-
-    # 10. Corrélation Âge et Années d'Expérience
-    print("\n10. Corrélation Âge et Années d'Expérience :")
-    if 'Age' in dataset.columns and 'Annees_experience' in dataset.columns:
-        age_exp_corr = dataset[['Age', 'Annees_experience']].dropna().corr().iloc[0, 1]
-        print(f"  - Corrélation Pearson (NaN exclus): {age_exp_corr:.2f}")
-    else:
-        print("  - N/A (colonnes Age ou Annees_experience manquantes)")
-
-    # 11. Pourcentage de Valeurs Manquantes par Colonne
-    print("\n11. Pourcentage de Valeurs Manquantes par Colonne :")
-    missing_percentage = (dataset.isnull().sum() / len(dataset)) * 100
-    print(missing_percentage[missing_percentage > 0].sort_values(ascending=False).round(2))
-        
-    # NOUVEAU: Vérification finale des contraintes statistiques clés
+      
+    #Vérification finale des contraintes statistiques clés
     print("\n*** VÉRIFICATION FINALE DES CONTRAINTES ***")
     mean_global_final = dataset['Revenu_Annuel'].mean()
     mean_urbain_final = dataset[dataset['Milieu'] == 'Urbain']['Revenu_Annuel'].mean()
