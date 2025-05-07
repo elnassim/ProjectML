@@ -1,372 +1,466 @@
 import pandas as pd
 import numpy as np
-from scipy import stats
+import random
+import uuid # Pour CIN et Email
 
-# Pour reproductibilité
-np.random.seed(42)
-num_samples = 40000
+# --- Paramètres Généraux ---
+N_RECORDS = 40000
+FILENAME = "dataset_revenu_marocains.csv"
 
-# ==============================================
-# 1. Paramètres pour atteindre les moyennes cibles
-# ==============================================
-# Cibles:
-# - Revenu moyen global: 21,949 DH
-# - Revenu moyen urbain: 26,988 DH
-# - Revenu moyen rural: 12,862 DH
+# --- Constantes Statistiques (Cibles HCP) ---
+REVENU_ANNUEL_MOYEN_GLOBAL_CIBLE = 21949
+REVENU_ANNUEL_MOYEN_URBAIN_CIBLE = 26988
+REVENU_ANNUEL_MOYEN_RURAL_CIBLE = 12862
 
-# Pour atteindre ces moyennes et la répartition urbain/rural correcte, nous devons ajuster:
-# 1. La proportion urbain/rural (calculée pour atteindre la moyenne globale cible)
-# 2. Les paramètres des distributions lognormales pour les revenus urbains et ruraux
+# Calcul de la proportion urbain/rural pour atteindre les moyennes
+# p_urbain * REVENU_URBAIN + (1-p_urbain) * REVENU_RURAL = REVENU_GLOBAL
+# p_urbain = (REVENU_GLOBAL - REVENU_RURAL) / (REVENU_URBAIN - REVENU_RURAL)
+P_URBAIN = (REVENU_ANNUEL_MOYEN_GLOBAL_CIBLE - REVENU_ANNUEL_MOYEN_RURAL_CIBLE) / \
+           (REVENU_ANNUEL_MOYEN_URBAIN_CIBLE - REVENU_ANNUEL_MOYEN_RURAL_CIBLE)
+P_RURAL = 1 - P_URBAIN
 
-# Calcul de la proportion urbain/rural pour atteindre la moyenne globale cible
-# Si x = proportion urbaine, alors:
-# x * 26988 + (1-x) * 12862 = 21949
-# Résolution: x = (21949 - 12862) / (26988 - 12862) = 0.643
+# --- Définition des Catégories ---
+MILIEU_OPTS = ['Urbain', 'Rural']
+SEXE_OPTS = ['Homme', 'Femme']
+NIVEAU_EDUCATION_OPTS = ['Sans niveau', 'Fondamental', 'Secondaire', 'Supérieur']
+ETAT_MATRIMONIAL_OPTS = ['Célibataire', 'Marié', 'Divorcé', 'Veuf']
+CSP_OPTS = ['Cadres supérieurs', 'Professions intermédiaires', 'Employés', 'Ouvriers', 'Agriculteurs', 'Inactifs']
+REGION_GEO_OPTS = ['Nord', 'Centre', 'Sud', 'Est', 'Ouest'] # Centre, Ouest, Nord plus riches
+SECTEUR_EMPLOI_OPTS = ['Public', 'Privé', 'Informel']
+OUI_NON_OPTS = ['Oui', 'Non']
 
-urban_proportion = 0.643  # Proportion urbaine calculée pour atteindre la moyenne globale
-rural_proportion = 1 - urban_proportion
+# --- Fonctions de Génération des Caractéristiques ---
 
-# Paramètres de distribution lognormale pour obtenir les moyennes cibles
-# Pour une distribution lognormale, la moyenne = exp(mu + sigma²/2)
-# On résout pour mu: mu = ln(moyenne) - sigma²/2
+def generate_age(n):
+    # Revenu tend à augmenter avec l'âge, approchant la retraite [18-63]
+    return np.random.randint(18, 64, n)
 
-# Urbain
-urban_sigma = 0.55  # Écart-type choisi pour avoir une distribution réaliste
-urban_mu = np.log(26988) - (urban_sigma**2)/2
+def generate_milieu(n):
+    return np.random.choice(MILIEU_OPTS, n, p=[P_URBAIN, P_RURAL])
 
-# Rural
-rural_sigma = 0.85  # Écart-type choisi pour avoir une distribution réaliste
-rural_mu = np.log(12862) - (rural_sigma**2)/2
+def generate_sexe(n):
+    # Revenu moyen des hommes généralement plus élevé
+    return np.random.choice(SEXE_OPTS, n, p=[0.52, 0.48]) # Légère prédominance pour illustrer écart
 
-# ==============================================
-# 2. Génération des caractéristiques de base
-# ==============================================
-data = {
-    # Urbain/rural selon la proportion calculée
-    "area": np.random.choice(["urbain", "rural"], num_samples, p=[urban_proportion, rural_proportion]),
+def generate_niveau_education(n):
+    # Revenu plus élevé avec niveau d'éducation supérieur
+    # Pondération : Moins de 'Sans niveau' et 'Supérieur', plus de 'Fondamental' et 'Secondaire'
+    return np.random.choice(NIVEAU_EDUCATION_OPTS, n, p=[0.15, 0.35, 0.35, 0.15])
+
+def generate_annees_experience(age, niveau_education):
+    experience = []
+    for a, edu in zip(age, niveau_education):
+        min_age_travail = 18
+        if edu == 'Supérieur':
+            min_age_travail = 23
+        elif edu == 'Secondaire':
+            min_age_travail = 20
+        
+        max_exp = a - min_age_travail
+        if max_exp < 0: max_exp = 0
+        
+        # Expérience plausible
+        exp = np.random.randint(0, max_exp + 1) if max_exp > 0 else 0
+        # Assurer que l'expérience ne dépasse pas age - 16 (pour un début à 16 ans min)
+        exp = min(exp, a - 16) if a > 16 else 0
+        experience.append(max(0,exp)) # Assurer non-négatif
+    return np.array(experience)
+
+def generate_etat_matrimonial(n, age):
+    # Impact variable. Hommes mariés, divorcés, veufs gagnent plus. Femmes divorcées/veuves aussi.
+    # Simplification: plus de mariés avec l'âge
+    etats = []
+    for a in age:
+        if a < 25:
+            etats.append(np.random.choice(ETAT_MATRIMONIAL_OPTS, p=[0.8, 0.15, 0.03, 0.02])) # Majorité célibataire
+        elif a < 45:
+            etats.append(np.random.choice(ETAT_MATRIMONIAL_OPTS, p=[0.2, 0.65, 0.1, 0.05])) # Majorité marié
+        else:
+            etats.append(np.random.choice(ETAT_MATRIMONIAL_OPTS, p=[0.1, 0.55, 0.15, 0.2])) # Plus de divorcés/veufs
+    return np.array(etats)
+
+def generate_csp(niveau_education, annees_experience, age):
+    # Classés du plus haut revenu au plus bas.
+    # 'Inactifs' pour certains cas (ex: très jeunes sans exp, ou plus âgés)
+    csps = []
+    for edu, exp, a in zip(niveau_education, annees_experience, age):
+        if exp < 1 and a < 22 and edu in ['Sans niveau', 'Fondamental']:
+            csps.append('Inactifs')
+        elif edu == 'Supérieur':
+            if exp > 10: csps.append('Cadres supérieurs')
+            elif exp > 3: csps.append('Professions intermédiaires')
+            else: csps.append('Employés')
+        elif edu == 'Secondaire':
+            if exp > 15: csps.append('Professions intermédiaires')
+            elif exp > 5: csps.append('Employés')
+            else: csps.append('Ouvriers')
+        elif edu == 'Fondamental':
+            if exp > 10: csps.append('Ouvriers')
+            else: csps.append(np.random.choice(['Ouvriers', 'Agriculteurs'], p=[0.7,0.3]))
+        else: # Sans niveau
+            csps.append(np.random.choice(['Ouvriers', 'Agriculteurs', 'Inactifs'], p=[0.4,0.4,0.2]))
+    return np.array(csps)
+
+def generate_possession_biens(n, csp_list, milieu_list):
+    # Corrélation positive avec revenu/CSP
+    prop_immo, veh_motor, terr_agri = [], [], []
+    for csp, milieu in zip(csp_list, milieu_list):
+        p_immo, p_veh, p_agri = 0.1, 0.1, 0.05 # Base pour Inactifs/Bas CSP
+
+        if csp == 'Cadres supérieurs': p_immo, p_veh = 0.8, 0.9
+        elif csp == 'Professions intermédiaires': p_immo, p_veh = 0.6, 0.7
+        elif csp == 'Employés': p_immo, p_veh = 0.3, 0.4
+        elif csp == 'Ouvriers': p_immo, p_veh = 0.15, 0.25
+        elif csp == 'Agriculteurs': p_immo, p_veh, p_agri = 0.4, 0.3, 0.7
+        
+        if milieu == 'Rural' and csp == 'Agriculteurs': p_agri = 0.85
+        if milieu == 'Rural': p_veh *= 0.8 # Moins de véhicules en rural sauf si agriculteur
+
+        prop_immo.append(np.random.choice(OUI_NON_OPTS, p=[p_immo, 1-p_immo]))
+        veh_motor.append(np.random.choice(OUI_NON_OPTS, p=[p_veh, 1-p_veh]))
+        terr_agri.append(np.random.choice(OUI_NON_OPTS, p=[p_agri, 1-p_agri]))
+    return prop_immo, veh_motor, terr_agri
+
+def generate_region_geographique(n):
+    # Centre, Ouest, Nord plus riches
+    return np.random.choice(REGION_GEO_OPTS, n, p=[0.25, 0.30, 0.15, 0.15, 0.15]) # Nord, Centre, Sud, Est, Ouest
+
+def generate_secteur_emploi(n, csp_list):
+    secteurs = []
+    for csp in csp_list:
+        if csp == 'Inactifs':
+            secteurs.append(np.nan) # Pas de secteur si inactif
+        elif csp == 'Agriculteurs':
+            secteurs.append(np.random.choice(['Privé', 'Informel'], p=[0.3,0.7]))
+        elif csp in ['Cadres supérieurs', 'Professions intermédiaires']:
+            secteurs.append(np.random.choice(['Public', 'Privé'], p=[0.4, 0.6]))
+        elif csp == 'Employés':
+            secteurs.append(np.random.choice(['Public', 'Privé', 'Informel'], p=[0.3, 0.5, 0.2]))
+        else: # Ouvriers
+            secteurs.append(np.random.choice(['Privé', 'Informel'], p=[0.4, 0.6]))
+    return np.array(secteurs)
+
+def generate_revenu_secondaire(n, csp_list):
+    # Plus probable pour CSP élevés ou certains secteurs
+    probs = []
+    for csp in csp_list:
+        if csp in ['Cadres supérieurs', 'Professions intermédiaires']:
+            probs.append(0.4)
+        elif csp == 'Agriculteurs':
+            probs.append(0.3)
+        elif csp == 'Employés':
+            probs.append(0.2)
+        else:
+            probs.append(0.1)
+    return np.array([np.random.choice(OUI_NON_OPTS, p=[p, 1-p]) for p in probs])
+
+
+def generate_revenu_annuel(df):
+    # Distributions séparées pour mieux contrôler les moyennes et proportions
+    urbain_mask = df['Milieu'] == 'Urbain'
+    rural_mask = ~urbain_mask
+
+    revenus = np.zeros(len(df))
+
+    # Urbain : log-normale ajustée pour ~66% sous la moyenne
+    urbain_mu, urbain_sigma = np.log(8000), 0.85
+    revenus_urbains = np.random.lognormal(mean=urbain_mu, sigma=urbain_sigma, size=sum(urbain_mask))
+
+    # Rural : log-normale ajustée pour ~85% sous la moyenne
+    rural_mu, rural_sigma = np.log(3200), 1.25
+    revenus_ruraux = np.random.lognormal(mean=rural_mu, sigma=rural_sigma, size=sum(rural_mask))
+
+    revenus[urbain_mask] = revenus_urbains
+    revenus[rural_mask] = revenus_ruraux
+
+    # Application des facteurs
+    for i in range(len(df)):
+        rev = revenus[i]
+        record = df.iloc[i]
+
+        # Sexe
+        if record['Sexe'] == 'Homme': rev *= 1.15
+
+        # Niveau d'éducation
+        if record['Niveau_education'] == 'Supérieur': rev *= 1.8
+        elif record['Niveau_education'] == 'Secondaire': rev *= 1.3
+        elif record['Niveau_education'] == 'Fondamental': rev *= 1.05
+        else: rev *= 0.85
+
+        # Années d'expérience
+        annees_exp_val = record['Annees_experience'] if pd.notna(record['Annees_experience']) else 0
+        rev *= (1 + annees_exp_val * 0.01)
+
+        # CSP
+        if record['CSP'] == 'Cadres supérieurs': rev *= 2.0
+        elif record['CSP'] == 'Professions intermédiaires': rev *= 1.6
+        elif record['CSP'] == 'Employés': rev *= 1.15
+        elif record['CSP'] == 'Ouvriers': rev *= 0.9
+        elif record['CSP'] == 'Agriculteurs': rev *= 0.85
+        elif record['CSP'] == 'Inactifs': rev = np.random.uniform(300, 2500)
+
+        # Région géographique
+        if record['Region_geographique'] in ['Centre', 'Ouest']: rev *= 1.15
+        elif record['Region_geographique'] == 'Nord': rev *= 1.1
+        elif record['Region_geographique'] in ['Sud', 'Est']: rev *= 0.9
+
+        # Secteur d'emploi
+        if pd.notna(record['Secteur_emploi']):
+            if record['Secteur_emploi'] == 'Public': rev *= 1.05
+            elif record['Secteur_emploi'] == 'Privé': rev *= 1.15
+            elif record['Secteur_emploi'] == 'Informel': rev *= 0.8
+
+        # Revenu secondaire
+        if record['Revenu_secondaire'] == 'Oui': rev *= 1.2
+
+        # Possession de biens
+        if record['Propriete_immobiliere'] == 'Oui': rev *= 1.03
+        if record['Vehicule_motorise'] == 'Oui': rev *= 1.02
+        if record['Terrain_agricole'] == 'Oui' and record['CSP'] == 'Agriculteurs': rev *= 1.05
+
+        # Plafonnement et plancher
+        rev = max(300, min(rev, 600000))
+        if record['CSP'] == 'Inactifs': rev = max(0, min(rev, 8000))
+
+        revenus[i] = round(rev, 0)
+
+    # Ajustement final pour atteindre la moyenne cible
+    mean_global = np.mean(revenus)
+    target_global = 21949
+    if abs(mean_global - target_global) > 500:
+        factor = target_global / mean_global
+        revenus = (revenus * factor).round(0)
+
+    return revenus
+
+# --- Fonctions pour Imperfections ---
+        current_exp = df.loc[idx, 'Annees_experience']
+        if pd.notna(current_exp) and df.loc[idx, 'Age'] < current_exp + 16:
+            df.loc[idx, 'Annees_experience'] = max(0, df.loc[idx, 'Age'] - 16 - np.random.randint(0, 3))
+
+    # Revenu Annuel (quelques très hauts/bas)
+    n_aberr_revenu = int(0.004 * len(df))  # AJUSTÉ: réduit à 0.4%
+    for _ in range(n_aberr_revenu):
+        idx = np.random.randint(0, len(df))
+        if df.loc[idx, 'CSP'] != 'Inactifs':  # Ne pas mettre revenu aberrant pour inactifs
+            df.loc[idx, 'Revenu_Annuel'] = np.random.choice([100, 200, 300000, 400000])  # AJUSTÉ: valeurs réduites
+
+    # Années d'expérience (quelques valeurs illogiques par rapport à l'âge, mais pas négatives)
+    n_aberr_exp = int(0.002 * len(df))  # AJUSTÉ: réduit à 0.2%
+    for _ in range(n_aberr_exp):
+        idx = np.random.randint(0, len(df))
+        age_val = df.loc[idx, 'Age']
+        df.loc[idx, 'Annees_experience'] = age_val - 10
+        if df.loc[idx, 'Annees_experience'] < 0:
+            df.loc[idx, 'Annees_experience'] = 0
+
+    return df
+
+# --- Génération du Dataset ---
+def generate_dataset():
+    data = pd.DataFrame()
+
+    # Caractéristiques Principales
+    data['Age'] = generate_age(N_RECORDS)
+    data['Milieu'] = generate_milieu(N_RECORDS)
+    data['Sexe'] = generate_sexe(N_RECORDS)
+    data['Niveau_education'] = generate_niveau_education(N_RECORDS)
+    data['Annees_experience'] = generate_annees_experience(data['Age'], data['Niveau_education'])
+    data['Etat_matrimonial'] = generate_etat_matrimonial(N_RECORDS, data['Age'])
+    data['CSP'] = generate_csp(data['Niveau_education'], data['Annees_experience'], data['Age'])
     
-    # Âge: distribution normale entre 18 et 70 ans
-    "age": np.clip(np.random.normal(35, 15, num_samples).astype(int), 18, 70),
+    prop_immo, veh_motor, terr_agri = generate_possession_biens(N_RECORDS, data['CSP'], data['Milieu'])
+    data['Propriete_immobiliere'] = prop_immo
+    data['Vehicule_motorise'] = veh_motor
+    data['Terrain_agricole'] = terr_agri
+
+    # Caractéristiques Additionnelles
+    data['Region_geographique'] = generate_region_geographique(N_RECORDS)
+    data['Secteur_emploi'] = generate_secteur_emploi(N_RECORDS, data['CSP'])
+    data['Revenu_secondaire'] = generate_revenu_secondaire(N_RECORDS, data['CSP'])
     
-    # Genre: 55% hommes, 45% femmes
-    "gender": np.random.choice(["homme", "femme"], num_samples, p=[0.55, 0.45]),
+    # Revenu Annuel (dépendant des autres)
+    data['Revenu_Annuel'] = generate_revenu_annuel(data.copy()) # .copy() pour éviter SettingWithCopyWarning
+
+    # Imperfections
+    # Colonnes Redondantes
+    data['Revenu_Mensuel'] = (data['Revenu_Annuel'] / 12).round(2)
     
-    # Niveau d'éducation
-    "education": np.random.choice(
-        ["sans_niveau", "fondamental", "secondaire", "supérieur"], 
-        num_samples, 
-        p=[0.2, 0.3, 0.3, 0.2]
-    ),
+    bins = [18, 25, 45, 60, 100] # 100 pour couvrir les âges aberrants
+    labels = ['Jeune', 'Adulte', 'Senior', 'Âgé']
+    data['Categorie_age'] = pd.cut(data['Age'], bins=bins, labels=labels, right=False)
+
+    # Colonnes Non Pertinentes
+    data['Adresse_Email'] = [f"user{uuid.uuid4().hex[:6]}@example.com" for _ in range(N_RECORDS)]
+    data['CIN'] = [f"{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}{random.randint(100000,999999)}" for _ in range(N_RECORDS)]
+
+    # Valeurs Manquantes (après génération de toutes les colonnes de base)
+    cols_with_nan = ['Etat_matrimonial', 'Secteur_emploi', 'Revenu_secondaire', 
+                     'Propriete_immobiliere', 'Vehicule_motorise', 'Terrain_agricole',
+                     'Annees_experience']
+    data = add_valeurs_manquantes(data, cols_with_nan, p_nan=0.015)  # AJUSTÉ: p_nan utilisé ici
+
+    # Valeurs Aberrantes (après génération et NaN, pour ne pas écraser trop de NaN)
+    data = add_valeurs_aberrantes(data)
     
-    # Groupe socio-professionnel
-    "socio_professional_group": np.random.choice(
-        ["Groupe1", "Groupe2", "Groupe3", "Groupe4", "Groupe5", "Groupe6"], 
-        num_samples, 
-        p=[0.1, 0.2, 0.15, 0.15, 0.25, 0.15]
-    ),
+    # Réajuster Revenu_Mensuel si Revenu_Annuel a été modifié par les aberrantes ou est NaN
+    data['Revenu_Mensuel'] = (data['Revenu_Annuel'] / 12).round(2)
+
+
+    # Vérification finale de cohérence pour Annees_experience vs Age
+    # Si une valeur aberrante d'âge a rendu l'expérience incohérente
+    mask_exp_incoherent = data['Annees_experience'] > (data['Age'] - 16)
+    data.loc[mask_exp_incoherent, 'Annees_experience'] = (data.loc[mask_exp_incoherent, 'Age'] - 16 - np.random.randint(0,2, size=mask_exp_incoherent.sum())).clip(lower=0)
     
-    # Années d'expérience: corrélées avec l'âge
-    "years_experience": np.zeros(num_samples),
+    # S'assurer que les inactifs ont bien un revenu bas ou NaN si le revenu est manquant
+    inactifs_mask = data['CSP'] == 'Inactifs'
+    data.loc[inactifs_mask, 'Revenu_Annuel'] = data.loc[inactifs_mask, 'Revenu_Annuel'].apply(lambda x: min(x, 10000) if pd.notna(x) else x)
+    data.loc[inactifs_mask, 'Revenu_Mensuel'] = (data.loc[inactifs_mask, 'Revenu_Annuel'] / 12).round(2)
+
+
+    # Ordonner les colonnes pour la lisibilité (optionnel)
+    ordered_columns = [
+        'Age', 'Categorie_age', 'Sexe', 'Milieu', 'Region_geographique', 'Etat_matrimonial',
+        'Niveau_education', 'Annees_experience', 'CSP', 'Secteur_emploi',
+        'Propriete_immobiliere', 'Vehicule_motorise', 'Terrain_agricole',
+        'Revenu_secondaire', 'Revenu_Annuel', 'Revenu_Mensuel',
+        'Adresse_Email', 'CIN'
+    ]
+    # S'assurer que toutes les colonnes sont présentes avant de réordonner
+    final_columns = [col for col in ordered_columns if col in data.columns]
+    missing_cols = [col for col in data.columns if col not in final_columns]
+    data = data[final_columns + missing_cols]
+
+
+    return data
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    print(f"Génération de {N_RECORDS} enregistrements...")
+    dataset = generate_dataset()
     
-    # État civil
-    "marital_status": np.random.choice(
-        ["célibataire", "marié", "divorcé", "veuf"], 
-        num_samples, 
-        p=[0.4, 0.4, 0.1, 0.1]
-    )
-}
+    # --- Vérifications Statistiques Détaillées ---
+    print("\n--- Vérifications Statistiques Détaillées ---")
 
-# Années d'expérience corrélées avec l'âge (entre 0 et âge-18)
-for i in range(num_samples):
-    max_exp = max(0, data["age"][i] - 18)
-    exp_mean = max_exp * 0.7  # En moyenne, 70% du temps depuis 18 ans
-    data["years_experience"][i] = min(max_exp, max(0, np.random.normal(exp_mean, 3)))
-data["years_experience"] = data["years_experience"].astype(int)
+    # 1. Revenus Annuels Moyens
+    print("\n1. Revenus Annuels Moyens :")
+    mean_global_ds = dataset['Revenu_Annuel'].mean()
+    print(f"  - Global (Dataset): {mean_global_ds:.0f} DH (Cible: {REVENU_ANNUEL_MOYEN_GLOBAL_CIBLE} DH)")
 
-# ==============================================
-# 3. Génération des caractéristiques supplémentaires
-# ==============================================
-# Définir urban_mask
-urban_mask = (data["area"] == "urbain")
+    urbain_ds = dataset[dataset['Milieu'] == 'Urbain']['Revenu_Annuel'].dropna()
+    rural_ds = dataset[dataset['Milieu'] == 'Rural']['Revenu_Annuel'].dropna()
 
-# 1. Voiture
-data["has_car"] = np.where(urban_mask, 
-                          np.random.choice([0, 1], num_samples, p=[0.3, 0.7]),
-                          np.random.choice([0, 1], num_samples, p=[0.6, 0.4]))
+    if not urbain_ds.empty:
+        mean_urbain_ds = urbain_ds.mean()
+        print(f"  - Urbain (Dataset): {mean_urbain_ds:.0f} DH (Cible: {REVENU_ANNUEL_MOYEN_URBAIN_CIBLE} DH)")
+    else:
+        print("  - Urbain (Dataset): N/A (pas de données urbaines)")
 
-# 2. Logement
-data["home_ownership"] = np.where(urban_mask,
-    np.random.choice(["owned", "rented", "other"], num_samples, p=[0.4, 0.5, 0.1]),
-    np.random.choice(["owned", "rented", "other"], num_samples, p=[0.7, 0.2, 0.1]))
+    if not rural_ds.empty:
+        mean_rural_ds = rural_ds.mean()
+        print(f"  - Rural (Dataset): {mean_rural_ds:.0f} DH (Cible: {REVENU_ANNUEL_MOYEN_RURAL_CIBLE} DH)")
+    else:
+        print("  - Rural (Dataset): N/A (pas de données rurales)")
 
-# 3. Terrain
-data["has_land"] = np.where(data["area"] == "rural", 
-                          np.random.choice([0, 1], num_samples, p=[0.2, 0.8]), 
-                          np.random.choice([0, 1], num_samples, p=[0.9, 0.1]))
+    # 2. Répartition des Revenus (Inférieurs à la moyenne respective)
+    print("\n2. Répartition des Revenus (Inférieurs à la moyenne respective) :")
+    pct_inf_moy_global = (dataset['Revenu_Annuel'] < mean_global_ds).mean() * 100
+    print(f"  - Global (Dataset): {pct_inf_moy_global:.1f}% (Cible: 71.8%)")
+    
+    if not urbain_ds.empty:
+        pct_inf_moy_urbain = (urbain_ds < mean_urbain_ds).mean() * 100
+        print(f"  - Urbain (Dataset): {pct_inf_moy_urbain:.1f}% (Cible: 65.9%)")
 
-# 4. Nombre d'enfants (corrélé avec l'état civil)
-data["number_of_children"] = np.zeros(num_samples, dtype=int)
-married_mask = (data["marital_status"] == "marié")
-data["number_of_children"][married_mask] = np.clip(np.random.poisson(1.5, married_mask.sum()), 0, 5)
-data["number_of_children"][~married_mask] = np.clip(np.random.poisson(0.7, (~married_mask).sum()), 0, 3)
+    if not rural_ds.empty:
+        pct_inf_moy_rural = (rural_ds < mean_rural_ds).mean() * 100
+        print(f"  - Rural (Dataset): {pct_inf_moy_rural:.1f}% (Cible: 85.4%)")
 
-# 5. Source de revenu secondaire
-df_temp = pd.DataFrame(data)
-data["source_revenu_secondaire"] = np.where(
-    df_temp["area"] == "rural",
-    # En rural : 60% ont une source secondaire (agriculture, élevage)
-    np.random.choice([0, 1], num_samples, p=[0.4, 0.6]), 
-    # En urbain : 35% ont une source secondaire (commerce, location)
-    np.random.choice([0, 1], num_samples, p=[0.65, 0.35])  
-)
+    # 3. Statistiques Descriptives du Revenu Annuel Global
+    print("\n3. Statistiques Descriptives du Revenu Annuel (Global) :")
+    print(dataset['Revenu_Annuel'].describe(percentiles=[.1, .25, .5, .75, .9]).round(0))
+    print(f"  Skewness: {dataset['Revenu_Annuel'].skew():.2f}")
+    print(f"  Kurtosis: {dataset['Revenu_Annuel'].kurtosis():.2f}")
+    median_global_ds = dataset['Revenu_Annuel'].median()
+    print(f"  Mean/Median Ratio: {(mean_global_ds / median_global_ds):.2f}")
 
-# 6. Assurance maladie
-data["health_insurance"] = np.where(
-    df_temp["socio_professional_group"].isin(["Groupe1", "Groupe2"]),
-    np.random.choice([0, 1], num_samples, p=[0.2, 0.8]),
-    np.random.choice([0, 1], num_samples, p=[0.7, 0.3])
-)
+    # 3b. Statistiques Descriptives du Revenu Annuel (Urbain)
+    print("\n3b. Statistiques Descriptives du Revenu Annuel (Urbain) :")
+    if not urbain_ds.empty:
+        print(urbain_ds.describe(percentiles=[.1, .25, .5, .75, .9]).round(0))
+        print(f"  Skewness: {urbain_ds.skew():.2f}")
+        print(f"  Kurtosis: {urbain_ds.kurtosis():.2f}")
+        median_urbain_ds = urbain_ds.median()
+        print(f"  Mean/Median Ratio: {(mean_urbain_ds / median_urbain_ds):.2f}")
+    else:
+        print("  N/A (pas de données urbaines)")
 
-# ==============================================
-# 4. Génération des revenus
-# ==============================================
-# Base du revenu (distribution lognormale)
-income = np.zeros(num_samples)
+    # 3c. Statistiques Descriptives du Revenu Annuel (Rural)
+    print("\n3c. Statistiques Descriptives du Revenu Annuel (Rural) :")
+    if not rural_ds.empty:
+        print(rural_ds.describe(percentiles=[.1, .25, .5, .75, .9]).round(0))
+        print(f"  Skewness: {rural_ds.skew():.2f}")
+        print(f"  Kurtosis: {rural_ds.kurtosis():.2f}")
+        median_rural_ds = rural_ds.median()
+        print(f"  Mean/Median Ratio: {(mean_rural_ds / median_rural_ds):.2f}")
+    else:
+        print("  N/A (pas de données rurales)")
 
-# Générer les revenus de base selon la zone
-urban_mask = (data["area"] == "urbain")
-rural_mask = ~urban_mask
+    # 4. Revenu Annuel Moyen par Sexe
+    print("\n4. Revenu Annuel Moyen par Sexe :")
+    print(dataset.groupby('Sexe')['Revenu_Annuel'].mean().round(0))
 
-income[urban_mask] = np.random.lognormal(urban_mu, urban_sigma, urban_mask.sum())
-income[rural_mask] = np.random.lognormal(rural_mu, rural_sigma, rural_mask.sum())
+    # 5. Revenu Annuel Moyen par Niveau d'Éducation
+    print("\n5. Revenu Annuel Moyen par Niveau d'Éducation :")
+    ordered_edu = [edu for edu in NIVEAU_EDUCATION_OPTS if edu in dataset['Niveau_education'].unique()]
+    if ordered_edu:
+        print(dataset.groupby('Niveau_education')['Revenu_Annuel'].mean().reindex(ordered_edu).round(0))
+    else:
+        print("N/A (colonne Niveau_education manquante ou vide)")
 
-# Appliquer des multiplicateurs pour les différents facteurs
-multipliers = np.ones(num_samples)
+    # 6. Corrélation Âge et Revenu Annuel
+    print("\n6. Corrélation Âge et Revenu Annuel :")
+    if 'Age' in dataset.columns and 'Revenu_Annuel' in dataset.columns:
+        age_revenu_corr = dataset[['Age', 'Revenu_Annuel']].corr().iloc[0, 1]
+        print(f"  - Corrélation Pearson: {age_revenu_corr:.2f}")
+    else:
+        print("  - N/A (colonnes Age ou Revenu_Annuel manquantes)")
 
-# 4.a – Effet Urbain vs Rural
-# les urbains gagnent en moyenne 15% de plus
-multipliers *= np.where(data["area"]=="urbain", 1.15, 1.00)
+    # 7. Corrélation Années d'Expérience et Revenu Annuel
+    print("\n7. Corrélation Années d'Expérience et Revenu Annuel :")
+    if 'Annees_experience' in dataset.columns and 'Revenu_Annuel' in dataset.columns:
+        exp_revenu_corr = dataset[['Annees_experience', 'Revenu_Annuel']].dropna().corr().iloc[0, 1]
+        print(f"  - Corrélation Pearson (NaN exclus): {exp_revenu_corr:.2f}")
+    else:
+        print("  - N/A (colonnes Annees_experience ou Revenu_Annuel manquantes)")
 
-# Éducation
-edu_multipliers = {
-    "sans_niveau": 0.85,
-    "fondamental": 0.95,
-    "secondaire": 1.1,
-    "supérieur": 1.4
-}
-edu_mult = np.array([edu_multipliers.get(data["education"][i], 1.0) for i in range(num_samples)])
-multipliers *= edu_mult
+    # 8. Revenu Annuel Moyen par CSP
+    print("\n8. Revenu Annuel Moyen par CSP :")
+    ordered_csp = [csp for csp in CSP_OPTS if csp in dataset['CSP'].unique()]
+    if ordered_csp:
+        print(dataset.groupby('CSP')['Revenu_Annuel'].mean().reindex(ordered_csp).round(0).sort_values(ascending=False))
+    else:
+        print("N/A (colonne CSP manquante ou vide)")
 
-# Groupe socio‑professionnel
-group_multipliers = {
-    "Groupe1": 1.6, "Groupe2": 1.3, "Groupe3": 1.1,
-    "Groupe4": 0.9, "Groupe5": 0.8, "Groupe6": 0.7
-}
-group_mult = np.array([group_multipliers.get(data["socio_professional_group"][i],1.0)
-                       for i in range(num_samples)])
-multipliers *= group_mult
+    # 9. Revenu Annuel Moyen par Région Géographique
+    print("\n9. Revenu Annuel Moyen par Région Géographique :")
+    ordered_regions = [region for region in REGION_GEO_OPTS if region in dataset['Region_geographique'].unique()]
+    if ordered_regions:
+        print(dataset.groupby('Region_geographique')['Revenu_Annuel'].mean().reindex(ordered_regions).round(0).sort_values(ascending=False))
+    else:
+        print("N/A (colonne Region_geographique manquante ou vide)")
 
-# Sexe: hommes +15%, femmes –15%
-multipliers *= np.where(np.array(data["gender"])=="homme", 1.15, 0.85)
+    # 10. Corrélation Âge et Années d'Expérience
+    print("\n10. Corrélation Âge et Années d'Expérience :")
+    if 'Age' in dataset.columns and 'Annees_experience' in dataset.columns:
+        age_exp_corr = dataset[['Age', 'Annees_experience']].dropna().corr().iloc[0, 1]
+        print(f"  - Corrélation Pearson (NaN exclus): {age_exp_corr:.2f}")
+    else:
+        print("  - N/A (colonnes Age ou Annees_experience manquantes)")
 
-# Expérience (fonction quadratique)
-exp_years = np.array(data["years_experience"])
-exp_effect = 0.8 + 0.01 * exp_years + 0.0005 * (exp_years**2)
-multipliers *= np.clip(exp_effect, 0.8, 2.0)
-
-# Âge (cloche autour de 52‑55 ans)
-age_arr = np.array(data["age"])
-age_effect = 0.7 + 0.02 * age_arr - 0.0002 * (age_arr**2)
-multipliers *= np.clip(age_effect, 0.7, 1.3)
-
-# 4.b – Effet Catégorie d’âge
-# jeune, adulte, sénior, âgé
-df = pd.DataFrame(data)  # Ensure df is defined before use
-df['age_category'] = pd.cut(df['age'], bins=[18, 26, 46, 61, 71], labels=['jeune', 'adulte', 'sénior', 'âgé'], right=False)
-
-cat_mult = df['age_category'].map({
-    'jeune': 0.90,
-    'adulte': 1.00,
-    'sénior': 1.10,
-    'âgé':    1.05
-}).fillna(1.0).values.astype(float)
-multipliers *= cat_mult
-
-# Appliquer bruit et arrondi final
-final_income = income * multipliers
-noise = np.random.lognormal(0, 0.2, num_samples)
-final_income *= noise
-data["income"] = np.round(final_income).astype(int)
-
-# ==============================================
-# 5. Ajustement pour obtenir les cibles exactes
-# ==============================================
-df = pd.DataFrame(data)
-
-# Vérifier les moyennes actuelles
-current_mean = df['income'].mean()
-current_urban_mean = df[df['area'] == 'urbain']['income'].mean()
-current_rural_mean = df[df['area'] == 'rural']['income'].mean()
-
-print(f"Moyennes initiales:")
-print(f"Global: {current_mean:.2f} DH (cible: 21949)")
-print(f"Urbain: {current_urban_mean:.2f} DH (cible: 26988)")
-print(f"Rural: {current_rural_mean:.2f} DH (cible: 12862)")
-
-# Ajustement pour atteindre les moyennes cibles
-urban_factor = 26988 / current_urban_mean
-rural_factor = 12862 / current_rural_mean
-
-# Appliquer les facteurs d'ajustement
-df.loc[df['area'] == 'urbain', 'income'] = (df.loc[df['area'] == 'urbain', 'income'] * urban_factor).round().astype(int)
-df.loc[df['area'] == 'rural', 'income'] = (df.loc[df['area'] == 'rural', 'income'] * rural_factor).round().astype(int)
-
-# Vérifier les moyennes ajustées
-adjusted_mean = df['income'].mean()
-adjusted_urban_mean = df[df['area'] == 'urbain']['income'].mean()
-adjusted_rural_mean = df[df['area'] == 'rural']['income'].mean()
-
-print(f"\nMoyennes ajustées:")
-print(f"Global: {adjusted_mean:.2f} DH (cible: 21949)")
-print(f"Urbain: {adjusted_urban_mean:.2f} DH (cible: 26988)")
-print(f"Rural: {adjusted_rural_mean:.2f} DH (cible: 12862)")
-
-# Vérifier les pourcentages en dessous de la moyenne
-pct_below_mean = (df['income'] < adjusted_mean).mean() * 100
-pct_below_urban_mean = (df[df['area'] == 'urbain']['income'] < adjusted_urban_mean).mean() * 100
-pct_below_rural_mean = (df[df['area'] == 'rural']['income'] < adjusted_rural_mean).mean() * 100
-
-print(f"\nPourcentages en dessous de la moyenne:")
-print(f"Global: {pct_below_mean:.1f}% (cible: 71.8%)")
-print(f"Urbain: {pct_below_urban_mean:.1f}% (cible: 65.9%)")
-print(f"Rural: {pct_below_rural_mean:.1f}% (cible: 85.4%)")
-# ==============================================
-# 6. Ajustement itératif des % < moyenne
-# ==============================================
-
-def adjust_distribution_for_target_percentile(incomes, mean_value, target_percent_below):
-    """
-    Ajuste un vecteur d'incomes pour obtenir target_percent_below % de valeurs < mean_value.
-    """
-    incomes = incomes.copy().astype(float)
-    for _ in range(10):
-        pct_below = (incomes < mean_value).mean() * 100
-        error = target_percent_below - pct_below
-        if abs(error) < 0.05:
-            break
-        # si on a trop peu de valeurs < mean, on diminue légèrement tous les revenus
-        # sinon on augmente légèrement
-        factor = 1 - error/1000
-        incomes = incomes * factor
-    return incomes
-
-# cibles
-target_pct = {'global': 71.8, 'urbain': 65.9, 'rural': 85.4}
-
-mask_u = df['area']=='urbain'
-mask_r = df['area']=='rural'
-
-# itération sur global/rural/urbain
-for _ in range(5):
-    # recalcul des moyennes
-    m_g = df['income'].mean()
-    m_u = df.loc[mask_u,'income'].mean()
-    m_r = df.loc[mask_r,'income'].mean()
-
-    # ajustement urbain
-    df.loc[mask_u, 'income'] = adjust_distribution_for_target_percentile(
-        df.loc[mask_u,'income'].values, m_u, target_pct['urbain']
-    ).round().astype(int)
-    # ajustement rural
-    df.loc[mask_r, 'income'] = adjust_distribution_for_target_percentile(
-        df.loc[mask_r,'income'].values, m_r, target_pct['rural']
-    ).round().astype(int)
-    # ajustement global
-    df['income'] = adjust_distribution_for_target_percentile(
-        df['income'].values, m_g, target_pct['global']
-    ).round().astype(int)
-
-# vérification finale
-final_global_mean = df['income'].mean()
-final_urban_mean  = df.loc[mask_u,'income'].mean()
-final_rural_mean  = df.loc[mask_r,'income'].mean()
-
-final_pct_global = (df['income'] < final_global_mean).mean()*100
-final_pct_urbain = (df.loc[mask_u,'income'] < final_urban_mean).mean()*100
-final_pct_rural  = (df.loc[mask_r,'income'] < final_rural_mean).mean()*100
-
-print(f"Répartition des revenus : {final_pct_global:.1f}% < moyenne (urbain {final_pct_urbain:.1f}%, rural {final_pct_rural:.1f}%)")
-
-
-# ==============================================
-# 7. Ajout de la catégorie d'âge
-# ==============================================
-bins = [18, 26, 46, 61, 71]
-labels = ['jeune', 'adulte', 'sénior', 'âgé']
-df['age_category'] = pd.cut(df['age'], bins=bins, labels=labels, right=False)
-
-# ==============================================
-# 8. Ajout de problèmes de qualité des données
-# ==============================================
-# Valeurs manquantes (5-10% dans diverses colonnes)
-missing_mask = np.random.rand(len(df)) < 0.07
-df.loc[missing_mask, "education"] = np.nan
-
-df["years_experience"] = df["years_experience"].mask(np.random.rand(len(df)) < 0.05, np.nan)
-df["home_ownership"] = df["home_ownership"].mask(np.random.rand(len(df)) < 0.03, np.nan)
-
-# Outliers (1% élevés, 0.5% bas)
-high_outliers = np.random.choice(len(df), int(len(df)*0.01), replace=False)
-df.loc[high_outliers, "income"] = np.random.randint(100000, 500000, len(high_outliers))
-
-low_outliers = np.random.choice(len(df), int(len(df)*0.005), replace=False)
-df.loc[low_outliers, "income"] = np.random.randint(0, 1000, len(low_outliers))
-
-# Colonnes redondantes ou non pertinentes
-df["year_of_birth"] = 2024 - df["age"]                    # Redondante
-df["age_squared"] = df["age"] ** 2                        # Redondante
-df["favorite_color"] = np.random.choice(                  # Non pertinente
-    ["rouge", "bleu", "vert", "jaune"], len(df))
-
-# ==============================================
-# 9. Calibration finale des revenus et vérifications
-# ==============================================
-
-# Calibration des moyennes finales
-targets = {'urbain': 26988, 'rural': 12862}
-global_tgt = 21949
-
-# Calibration par zone
-for area, tgt in targets.items():
-    mask = df['area'] == area
-    current_mean = df.loc[mask, 'income'].mean()
-    df.loc[mask, 'income'] = (df.loc[mask, 'income'] * (tgt / current_mean)).round().astype(int)
-
-# Calibration de la moyenne globale
-current_global_mean = df['income'].mean()
-df['income'] = (df['income'] * (global_tgt / current_global_mean)).round().astype(int)
-
-# Calcul des moyennes finales
-final_global_mean = df['income'].mean()
-final_urban_mean = df[df['area'] == 'urbain']['income'].mean()
-final_rural_mean = df[df['area'] == 'rural']['income'].mean()
-
-# Calcul des pourcentages sous la moyenne
-final_pct_below_global = (df['income'] < final_global_mean).mean() * 100
-final_pct_below_urban = (df[df['area'] == 'urbain']['income'] < final_urban_mean).mean() * 100
-final_pct_below_rural = (df[df['area'] == 'rural']['income'] < final_rural_mean).mean() * 100
-
-# Affichage des vérifications finales
-print("\n----- Vérifications finales -----")
-print(f"Moyenne globale : {final_global_mean:.2f} DH (cible : 21 949)")
-print(f"Moyenne urbaine : {final_urban_mean:.2f} DH (cible : 26 988)")
-print(f"Moyenne rurale  : {final_rural_mean:.2f} DH (cible : 12 862)")
-
-print(f"\nRépartition des revenus : {final_pct_below_global:.1f}% < moyenne (urbain {final_pct_below_urban:.1f}%, rural {final_pct_below_rural:.1f}%)")
-print("Cibles : 71,8% (urbain 65,9%, rural 85,4%)")
-df['income'] = (df['income'] * (global_tgt/current_global_mean)).round().astype(int)
-# ==============================================
-# 10. Sauvegarde du dataset
-# ==============================================
-df.to_csv("dataset_revenu_marocains.csv", index=False)
-print("\nDataset généré avec succès !")
+    # 11. Pourcentage de Valeurs Manquantes par Colonne
+    print("\n11. Pourcentage de Valeurs Manquantes par Colonne :")
+    missing_percentage = (dataset.isnull().sum() / len(dataset)) * 100
+    print(missing_percentage[missing_percentage > 0].sort_values(ascending=False).round(2))
+        
+    dataset.to_csv(FILENAME, index=False, encoding='utf-8')
+    print(f"\nDataset '{FILENAME}' généré avec succès ({len(dataset)} enregistrements).")
