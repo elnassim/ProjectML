@@ -1,0 +1,99 @@
+# Résumé du Mini-Projet : Prédiction du Revenu Annuel Marocain
+
+## 1. Objectif Principal
+- Construire un pipeline complet de Machine Learning (Python) pour prédire le revenu annuel des Marocains.
+- Utiliser des données simulées réalistes.
+- Couvrir les étapes : compréhension, préparation, modélisation, évaluation, déploiement.
+
+## 2. Organisation
+- **Présentation :** Mercredi 14 mai 2025.
+- **Format :** Notebook Jupyter (.ipynb) ou équivalent, bien documenté (Markdown, graphiques).
+
+## 3. Génération du Dataset (`dataset_revenu_marocains.csv`)
+- **Script :** `generate_dataset.py`.
+- **Taille :** Environ 40 000 enregistrements.
+- **Contraintes Statistiques Clés (HCP) :**
+    - Revenu moyen global : 21.949 DH/an.
+    - Revenu moyen Urbain : 26.988 DH/an.
+    - Revenu moyen Rural : 12.862 DH/an.
+    - Répartition : 71,8% revenus < moyenne globale (Urbain: 65,9%, Rural: 85,4%).
+- **Facteurs Influents (à inclure) :**
+    - Âge (et Catégorie d’âge : jeune, adulte, sénior, âgé).
+    - Milieu (Urbain/Rural).
+    - Sexe.
+    - Niveau d'éducation (sans, fondamental, secondaire, supérieur).
+    - Années d’expérience.
+    - État matrimonial (Célibataire, marié, divorcé, veuf).
+    *   Possession de biens.
+    - Catégorie socioprofessionnelle (CSP) : 6 groupes.
+- **Caractéristiques Additionnelles :** Au moins 3 pertinentes au choix de l'étudiant.
+- **Imperfections à Inclure :**
+    - Valeurs manquantes.
+    - Valeurs aberrantes.
+    - Colonnes redondantes.
+    - Colonnes non pertinentes.
+
+## 4. Spécifications Techniques
+- **Langage :** Python.
+- **Librairies Principales :**
+    - `numpy`, `pandas` (manipulation).
+    - `matplotlib`, `seaborn`, `Sweetviz` (ou équivalent pour visualisation).
+    - `scikit-learn` (Machine Learning).
+    - `Streamlit` (ou équivalent pour déploiement web).
+
+## 5. Étapes du Projet (Spécifications Fonctionnelles)
+
+### 5.1. Compréhension des Données
+- Chargement, affichage (10 premières lignes).
+- Description (volume, dimension, types, codage).
+- Statistiques descriptives (analyse et interprétation).
+- Exploration approfondie (`Sweetviz` ou `ydata-profiling`).
+- **Note :** Utiliser `make_pipeline` pour nettoyage, transformation, modélisation.
+
+### 5.2. Nettoyage des Données
+- Élimination des doublons.
+- Traitement des valeurs manquantes (proposer et appliquer technique).
+- Traitement des valeurs aberrantes (proposer et appliquer technique).
+
+### 5.3. Transformation des Données
+- Suppression d'attributs non pertinents (justifier).
+- Création de nouveaux attributs (justifier).
+- Normalisation des attributs numériques (si nécessaire, justifier).
+- Encodage des attributs catégoriels en numériques (justifier).
+
+### 5.4. Séparation des Données
+- Ensemble d'apprentissage : 70%.
+- Ensemble de test : 30%.
+
+### 5.5. Création et Validation des Modèles
+- **Modèles de Régression à Entraîner (5) :**
+    1.  `LinearRegression`
+    2.  `DecisionTreeRegressor`
+    3.  `RandomForestRegressor`
+    4.  `GradientBoostingRegressor`
+    5.  `MLPRegressor`
+- **Métriques d'Évaluation :** MAE, RMSE, R2.
+- **Optimisation :** Validation croisée et ajustement des hyperparamètres (`GridSearchCV` ou `RandomizedSearchCV`).
+    - **Hyperparamètres spécifiques listés dans le backlog pour chaque modèle (sauf Régression Linéaire).**
+- Sélectionner le modèle le plus performant.
+
+### 5.6. Test du Modèle
+- Évaluer le modèle sélectionné sur l'ensemble de test.
+- Itérer si les performances ne sont pas satisfaisantes.
+
+### 5.7. Déploiement
+- Sauvegarder le modèle final (avec `joblib`).
+- Créer une API avec `FastAPI`.
+- Développer une application web simple avec `Streamlit` (ou équivalent) pour :
+    - Saisir les variables prédictives.
+    - Afficher la prédiction du revenu.
+
+## 6. Livrables
+- `generate_dataset.py`
+- `dataset_revenu_marocains.csv`
+- `mini_projet_AI_Noms.ipynb` (Notebook du projet)
+- `modele_selection.joblib` (Modèle sauvegardé)
+- `api.py` (Script API FastAPI)
+- `app.py` (Script application web Streamlit)
+- `README.md`
+- Tout autre fichier nécessaire.

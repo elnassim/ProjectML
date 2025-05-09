@@ -1,0 +1,67 @@
+# Spécifications pour la Génération du Dataset (`dataset_revenu_marocains.csv`)
+
+## 1. Informations Générales
+
+- **Nom du script de génération :** `generate_dataset.py`
+- **Nom du fichier dataset :** `dataset_revenu_marocains.csv`
+- **Taille du dataset :** Environ 40 000 enregistrements.
+
+## 2. Contraintes Statistiques Clés (Basées sur HCP)
+
+- **Revenu Annuel Moyen Global :** 21.949 DH
+- **Revenu Annuel Moyen (Milieu Urbain) :** 26.988 DH
+- **Revenu Annuel Moyen (Milieu Rural) :** 12.862 DH
+- **Répartition des Revenus (Inférieurs à la moyenne) :**
+  - **Global :** 71,8% des individus ont un revenu inférieur à la moyenne globale.
+  - **Urbain :** 65,9% des individus en milieu urbain ont un revenu inférieur à la moyenne urbaine.
+  - **Rural :** 85,4% des individus en milieu rural ont un revenu inférieur à la moyenne rurale.
+
+## 3. Facteurs Influents à Inclure (Caractéristiques Principales)
+
+- **Âge :** Numérique. Le revenu tend à augmenter avec l'âge, approchant la retraite [18-63].
+- **Milieu :** Catégorielle (Urbain, Rural). Impact direct sur le revenu plus élevée pour urbain.
+- **Sexe :** Catégorielle (Homme, Femme). Revenu moyen des hommes généralement plus élevé.
+- **Niveau d'éducation :** Catégorielle (Sans niveau, Fondamental, Secondaire, Supérieur). Revenu plus élevé avec niveau d'éducation supérieur.
+- **Années d’expérience :** Numérique. Revenu plus élevé avec plus d'expérience.
+- **État matrimonial :** Catégorielle (Célibataire, Marié, Divorcé, Veuf). Impact variable sur le revenu - les hommes mariés, divorcés ou veufs gagnent souvent plus que les célibataires. Les femmes divorcés et veufs peuvent présenter des revenus plus élevés.
+- **Possession de biens :** Plusieurs colonnes binaires (Oui/Non):
+  - **Propriété immobilière :**
+  - **Véhicule motorisé :**
+  - **Terrain agricole :**
+    _Note: Ces possessions corrèlent positivement avec le revenu_
+- **Catégorie Socioprofessionnelle (CSP) :** Catégorielle (Cadres supérieurs, Professions intermédiaires, Employés, Ouvriers, Agriculteurs, Inactifs). Classés du plus haut revenu au plus bas.
+
+## 4. Caractéristiques Additionnelles (Au moins 3 pertinentes + ajouts spécifiques)
+
+- **Région géographique :** Catégorielle (ex: Nord, Centre, Sud, Est, Ouest). Le revenu moyen doit varier significativement selon la catégorie : par exemple, plus élevé pour les catégories 'Centre' 'Ouest' et 'Nord' (elles représentent les pôles économiques majeurs comme l'axe Casablanca-Rabat ou Tanger) et plus bas pour 'Sud' et 'Est'.
+- **Secteur d'emploi:** Catégorielle (Public, Privé, Informel). Impact sur le revenu: Public - stabilité et avantages sociaux; Privé - généralement salaires plus élevés mais variable; Informel - revenus plus bas et irréguliers.
+- **Revenu secondaire :** Booléen (Oui/Non). Augmente le revenu total pour ceux qui ont une activité complémentaire ou un investissement.
+
+## 5. Imperfections à Inclure dans le Dataset
+
+- **Valeurs Manquantes :** Introduire des `NaN` dans certaines colonnes de manière aléatoire.
+- **Valeurs Aberrantes :** Introduire des valeurs illogiques ou extrêmes dans certaines colonnes (ex: âge très élevé/bas, revenu disproportionné).
+- **Colonnes Redondantes :**
+  - **Revenu Mensuel :** Calculable à partir du `Revenu Annuel ` (`Revenu_Annuel_ / 12`).
+  - **Catégorie d’âge :** Catégorielle (Jeune, Adulte, Sénior, Âgé). Dérivée de l'âge.
+- **Colonnes Non Pertinentes (Exemples) :**
+  - **Adresse Email :** Chaîne de caractères (format email).
+  - **CIN (Carte d'Identité Nationale) :** Chaîne de caractères unique.
+
+## Notes pour la Génération :
+
+- Assurer une corrélation logique entre les facteurs (ex: `Années d'expérience` vs `Âge` et `Niveau d'éducation`).
+- La distribution des revenus doit être asymétrique (log-normale est une bonne candidate de base).
+- L'impact des facteurs sur le revenu doit refléter les descriptions (ex: `Sexe`, `Niveau d'éducation`).
+- **Corrélations Logiques :**
+  - Assurer une corrélation positive entre `Âge` et `Années d’expérience`.
+  - `Niveau d'éducation` doit positivement corréler avec le `Revenu Annuel ` et influencer la `CSP`.
+  - `CSP` doit être un indicateur fort du `Revenu Annuel `, respectant la hiérarchie décrite.
+- **Cohérence Générale :**
+  - S'assurer que les combinaisons de caractéristiques soient plausibles (ex: un jeune de 18 ans ne devrait pas avoir 20 ans d'expérience).
+  - Les imperfections (valeurs manquantes, aberrantes) doivent être introduites de manière à ne pas fausser complètement les contraintes statistiques clés lors des vérifications initiales.
+
+
+- **Cohérence Générale :**
+  - S'assurer que les combinaisons de caractéristiques soient plausibles (ex: un jeune de 18 ans ne devrait pas avoir 20 ans d'expérience).
+  - Les imperfections (valeurs manquantes, aberrantes) doivent être introduites de manière à ne pas fausser complètement les contraintes statistiques clés lors des vérifications initiales.
