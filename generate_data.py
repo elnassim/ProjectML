@@ -163,7 +163,7 @@ def generate_revenu_annuel(df):
     revenus = np.zeros(len(df))
 
     # Ajustement des paramètres sigma pour viser les contraintes de répartition
-    urbain_mu, urbain_sigma = np.log(7300), 0.45  # Ajusté pour cible 65.9%
+    urbain_mu, urbain_sigma = np.log(7300), 0.5  # Ajusté pour cible 65.9%
     rural_mu, rural_sigma = np.log(2000), 2.11  # Ajusté pour cible 85.4%
 
     revenus_urbains = np.random.lognormal(mean=urbain_mu, sigma=urbain_sigma, size=sum(urbain_mask))
@@ -361,6 +361,35 @@ def generate_dataset():
             factor_rural = REVENU_ANNUEL_MOYEN_RURAL_CIBLE / mean_rural_actuel
             data.loc[rural_mask & data['Revenu_Annuel'].notna(), 'Revenu_Annuel'] *= factor_rural
     
+    # --- Ajustement additionnel pour respecter la contrainte sur le pourcentage urbain ---
+    target_pct = 65.7
+    tol = 0.1  # tolérance de 0.1%
+    max_iterations = 10
+
+    for _ in range(max_iterations):
+        urban_values = data.loc[urbain_mask, 'Revenu_Annuel']
+        urban_mean = urban_values.mean()
+        pct_urban = (urban_values < urban_mean).mean() * 100
+
+        if abs(pct_urban - target_pct) < tol:
+            break
+
+        if pct_urban > target_pct:
+            # Trop d'individus en dessous de la moyenne : on augmente les bas revenus
+            factor = 1 + (pct_urban - target_pct) / 100  
+            data.loc[(urbain_mask) & (data['Revenu_Annuel'] < urban_mean), 'Revenu_Annuel'] *= factor
+        else:
+            # Pas assez d'individus en dessous de la moyenne : on réduit les revenus supérieurs ou égaux à la moyenne
+            factor = 1 - (target_pct - pct_urban) / 100  
+            data.loc[(urbain_mask) & (data['Revenu_Annuel'] >= urban_mean), 'Revenu_Annuel'] *= factor
+
+        # Ré-ajuster pour maintenir la moyenne cible urbaine
+        urban_mean_new = data.loc[urbain_mask, 'Revenu_Annuel'].mean()
+        if urban_mean_new != 0:
+            factor_urban_correction = REVENU_ANNUEL_MOYEN_URBAIN_CIBLE / urban_mean_new
+            data.loc[urbain_mask, 'Revenu_Annuel'] *= factor_urban_correction
+    # --- Fin de l'ajustement additionnel ---
+
     data['Revenu_Annuel'] = data['Revenu_Annuel'].round(0)
     data['Revenu_Mensuel'] = (data['Revenu_Annuel'] / 12).round(2)
     
