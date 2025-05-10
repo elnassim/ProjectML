@@ -30,7 +30,7 @@ plus que les personnes du milieu rural.
 o Sexe : le revenu moyen des hommes est plus élevé que celui des femmes.
 o niveau d'éducation : (quatre niveaux à distinguer : sans niveau, fondamental, secondaire, supérieur), avec un revenu moyen plus élevé pour les personnes ayant un niveau d’enseignement supérieur.
 o Années d’expérience : Plus on est expérimenté, plus le revenu est élevé.
-o État matrimonial : Célibataire, marié, divorcé, veuf
+o État matrimonial : Célibataire, marié, divorcé, veuf, divorcé
 o Possession de biens : (voiture, logement, terrain, etc.) ça peut refléter le niveau socio-économique d’un citoyen.
 2ème année Cycle d’ingéieurs – GI Intelligence Artificielle
  • Test des modèles
@@ -165,4 +165,3 @@ o Vous pouvez proposer d’autres fonctionnalités
 • Un fichier README.md
 • Tout autre fichier nécessaire pour le bon fonctionnement du notebook ou de
 l’application web de déploiement.
- Y. EL YOUNOUSSI 9/9 2024-2025
