@@ -122,72 +122,137 @@ def generate_revenu_secondaire(n, csp_list):
     return np.array([np.random.choice(OUI_NON_OPTS, p=[p, 1-p]) for p in probs])
 
 # --- Nouvelle Fonction de Génération du Revenu Annuel ---
+def adjust_group_revenus(revenus_group, target_prop, tol=0.01, max_iter=50):
+    """
+    Applique une transformation puissance sur les revenus du groupe afin que
+    la proportion des valeurs inférieures à la moyenne soit proche de target_prop.
+    Cette transformation préserve l'ordre (monotone) et devrait conserver les relations.
+    """
+    b_low, b_high = 0.5, 2.0
+    b = 1.0
+    for _ in range(max_iter):
+        trans = np.power(revenus_group, b)
+        new_mean = trans.mean()
+        prop = (trans < new_mean).mean()
+        if abs(prop - target_prop) < tol:
+            return trans
+        if prop > target_prop:
+            b_high = b
+        else:
+            b_low = b
+        b = (b_low + b_high) / 2.0
+    return trans  # Au bout de max_iter
+
 def generate_revenu_annuel(df):
     n = len(df)
     revenus = np.zeros(n)
+    
+    # Masques pour identifier les milieux
+    is_urbain = (df['Milieu'] == 'Urbain').values
+    is_rural = (df['Milieu'] == 'Rural').values
 
-    # Revenu de base avec moins de variance
-    base_revenu = np.random.lognormal(mean=np.log(1500), sigma=0.05, size=n)  # Réduction de sigma
+    # Paramètres de distribution de base distincts - Réduction des sigmas
+    base_revenu_log_mean_urbain = np.log(11000)
+    base_revenu_log_sigma_urbain = 0.65 # Réduit par rapport à 0.85
+    base_revenu_log_mean_rural = np.log(7000)
+    base_revenu_log_sigma_rural = 0.95  # Réduit par rapport à 1.15
 
+    # Génération des revenus de base spécifiques
+    if is_urbain.sum() > 0:
+        revenus[is_urbain] = np.random.lognormal(mean=base_revenu_log_mean_urbain,
+                                                  sigma=base_revenu_log_sigma_urbain,
+                                                  size=is_urbain.sum())
+    if is_rural.sum() > 0:
+        revenus[is_rural] = np.random.lognormal(mean=base_revenu_log_mean_rural,
+                                                 sigma=base_revenu_log_sigma_rural,
+                                                 size=is_rural.sum())
+
+    # Application des bonus/facteurs
     for i in range(n):
         record = df.iloc[i]
-        rev_i = base_revenu[i]
-
-        # Impact du Milieu
-        milieu_bonus = 2000 if record['Milieu'] == 'Urbain' else 500  # Valeurs fixes
-        rev_i += milieu_bonus
-
-        # Impact Niveau d'Éducation
+        rev = revenus[i]
+        # Niveau d'éducation - impact augmenté
         if record['Niveau_education'] == 'Supérieur':
-            rev_i += 15000 * (1 + 0.1 * record['Annees_experience'])
+            rev += 25000 * (1 + 0.15 * record['Annees_experience']) # Augmentation du bonus et de l'effet de l'expérience
         elif record['Niveau_education'] == 'Secondaire':
-            rev_i += 6000 * (1 + 0.07 * record['Annees_experience'])
+            rev += 10000 * (1 + 0.1 * record['Annees_experience'])  # Augmentation du bonus
         elif record['Niveau_education'] == 'Fondamental':
-            rev_i += 2000 * (1 + 0.05 * record['Annees_experience'])
-        else:
-            rev_i += 500 * (1 + 0.03 * record['Annees_experience'])
+            rev += 3000 * (1 + 0.05 * record['Annees_experience']) # Légère augmentation
+        else: # Sans niveau
+            rev += 750 * (1 + 0.03 * record['Annees_experience'])  # Légère augmentation
 
-        # Impact CSP
+        # CSP - facteurs augmentés
         csp_factor = {
-            'Cadres supérieurs': 2.0,
-            'Professions intermédiaires': 1.6,
-            'Employés': 1.2,
-            'Ouvriers': 0.9,
-            'Agriculteurs': 0.8,
-            'Inactifs': 1.0
+            'Cadres supérieurs': 2.5,         # Augmenté
+            'Professions intermédiaires': 1.8, # Augmenté
+            'Employés': 1.4,                  # Augmenté
+            'Ouvriers': 1.0,                  # Ajusté
+            'Agriculteurs': 0.9,              # Ajusté
+            'Inactifs': 0.3                   # Réduit pour marquer la différence
         }.get(record['CSP'], 1.0)
-        rev_i *= csp_factor
+        rev *= csp_factor
 
-        # Impact Sexe
-        rev_i *= 1.2 if record['Sexe'] == 'Homme' else 0.95
+        # Sexe - impact légèrement ajusté pour plus de clarté
+        rev *= 1.25 if record['Sexe'] == 'Homme' else 0.90
 
-        # Impact Région
+        # Région - impact maintenu ou légèrement ajusté si nécessaire
         region_factor = {
-            'Centre': 1.1,
-            'Ouest': 1.1,
-            'Nord': 1.05,
-            'Sud': 0.95,
-            'Est': 0.95
+            'Centre': 1.1, 'Ouest': 1.1, 'Nord': 1.05,
+            'Sud': 0.95, 'Est': 0.95
         }.get(record['Region_geographique'], 1.0)
-        rev_i *= region_factor
+        rev *= region_factor
 
-        # Impact Secteur Emploi
+        # Secteur Emploi - impact ajusté
         if pd.notna(record['Secteur_emploi']) and record['CSP'] != 'Inactifs':
-            secteur_factor = {
-                'Public': 1.05,
-                'Privé': 1.1,
-                'Informel': 0.8
-            }.get(record['Secteur_emploi'], 1.0)
-            rev_i *= secteur_factor
-
-        # Impact Revenu Secondaire
+            secteur_factor = {'Public': 1.1, 'Privé': 1.15, 'Informel': 0.85}.get(record['Secteur_emploi'], 1.0) # Ajustement des facteurs
+            rev *= secteur_factor
+        
+        # Revenu Secondaire - impact maintenu
         if record['Revenu_secondaire'] == 'Oui':
-            rev_i += 3000  # Valeur fixe
+            rev += 3000
+        revenus[i] = rev
 
-        # Plafonnement et plancher
-        rev_i = max(300, min(rev_i, 600000))
-        revenus[i] = round(rev_i, 0)
+    # Calibration des moyennes par milieu
+    df_temp = pd.DataFrame({'rev': revenus, 'Milieu': df['Milieu'].values})
+    CIBLE_URBAIN = 26988
+    CIBLE_RURAL = 12862
+    mean_urbain = df_temp.loc[is_urbain, 'rev'].mean() if is_urbain.sum() > 0 else 1
+    mean_rural = df_temp.loc[is_rural, 'rev'].mean() if is_rural.sum() > 0 else 1
+    
+    if is_urbain.sum() > 0 and mean_urbain > 0 : # Éviter la division par zéro ou NaN
+        revenus[is_urbain] *= CIBLE_URBAIN / mean_urbain
+    if is_rural.sum() > 0 and mean_rural > 0 : # Éviter la division par zéro ou NaN
+        revenus[is_rural] *= CIBLE_RURAL / mean_rural
 
+
+    # Plafonnement
+    revenus = np.clip(revenus, 300, 600000)
+    inactifs = (df['CSP'] == 'Inactifs').values
+    revenus[inactifs] = np.minimum(revenus[inactifs], 8000)
+
+    # Ajustement des proportions sous la moyenne
+    # Vous pouvez moduler ou désactiver cette partie pour observer l'impact sur le R²
+    global_target = 0.718
+    urbain_target = 0.659
+    rural_target = 0.854
+
+    # S'assurer que les sous-groupes ne sont pas vides avant d'appeler adjust_group_revenus
+    if revenus.size > 0 :
+        revenus = adjust_group_revenus(revenus, global_target)
+    if is_urbain.sum() > 0 and revenus[is_urbain].size > 0:
+        revenus[is_urbain] = adjust_group_revenus(revenus[is_urbain], urbain_target)
+    if is_rural.sum() > 0 and revenus[is_rural].size > 0:
+        revenus[is_rural] = adjust_group_revenus(revenus[is_rural], rural_target)
+
+
+    # Renormalisation des moyennes
+    if is_urbain.sum() > 0 and np.mean(revenus[is_urbain]) > 0: # Éviter la division par zéro
+        revenus[is_urbain] *= CIBLE_URBAIN / np.mean(revenus[is_urbain])
+    if is_rural.sum() > 0 and np.mean(revenus[is_rural]) > 0: # Éviter la division par zéro
+        revenus[is_rural] *= CIBLE_RURAL / np.mean(revenus[is_rural])
+
+    # Plafonnement final
+    revenus = np.clip(revenus, 300, 600000)
     return revenus
 
 # --- Fonctions pour Imperfections (améliorées) ---
@@ -339,13 +404,43 @@ if __name__ == "__main__":
     print("\n--- Statistiques Descriptives du Revenu Annuel  ---")
     print(dataset['Revenu_Annuel'].describe())
     
-    print("\nMoyennes par Milieu :")
-    print(dataset.groupby('Milieu')['Revenu_Annuel'].mean())
+    # --- Vérification des Contraintes HCP ---
+    print("\n--- Vérification des Contraintes Statistiques (Basées sur HCP) ---")
+    
+    # Revenus moyens globaux et par milieu
+    revenu_moyen_global_genere = dataset['Revenu_Annuel'].mean()
+    print(f"Revenu Annuel Moyen Global (Généré): {revenu_moyen_global_genere:.0f} DH (Cible HCP: 21949 DH)")
 
-    print("\nMoyennes par CSP :")
+    moyennes_milieu_genere = dataset.groupby('Milieu')['Revenu_Annuel'].mean()
+    revenu_moyen_urbain_genere = moyennes_milieu_genere.get('Urbain', np.nan)
+    revenu_moyen_rural_genere = moyennes_milieu_genere.get('Rural', np.nan)
+
+    print(f"Revenu Annuel Moyen Urbain (Généré): {revenu_moyen_urbain_genere:.0f} DH (Cible HCP: 26988 DH)")
+    print(f"Revenu Annuel Moyen Rural (Généré): {revenu_moyen_rural_genere:.0f} DH (Cible HCP: 12862 DH)")
+
+    # Proportions de revenus inférieurs à la moyenne
+    if pd.notna(revenu_moyen_global_genere):
+        prop_inf_moy_global = (dataset['Revenu_Annuel'] < revenu_moyen_global_genere).mean() * 100
+        print(f"Proportion revenus < moyenne globale (Généré): {prop_inf_moy_global:.1f}% (Cible HCP: 71.8%)")
+    else:
+        print("Proportion revenus < moyenne globale (Généré): Non calculable (moyenne globale NaN)")
+
+    if pd.notna(revenu_moyen_urbain_genere) and 'Urbain' in moyennes_milieu_genere:
+        prop_inf_moy_urbain = (dataset[dataset['Milieu'] == 'Urbain']['Revenu_Annuel'] < revenu_moyen_urbain_genere).mean() * 100
+        print(f"Proportion revenus < moyenne urbaine (Généré): {prop_inf_moy_urbain:.1f}% (Cible HCP: 65.9%)")
+    else:
+        print("Proportion revenus < moyenne urbaine (Généré): Non calculable")
+    
+    if pd.notna(revenu_moyen_rural_genere) and 'Rural' in moyennes_milieu_genere:
+        prop_inf_moy_rural = (dataset[dataset['Milieu'] == 'Rural']['Revenu_Annuel'] < revenu_moyen_rural_genere).mean() * 100
+        print(f"Proportion revenus < moyenne rurale (Généré): {prop_inf_moy_rural:.1f}% (Cible HCP: 85.4%)")
+    else:
+        print("Proportion revenus < moyenne rurale (Généré): Non calculable")
+
+    print("\nMoyennes par CSP (Généré) :")
     print(dataset.groupby('CSP')['Revenu_Annuel'].mean().sort_values(ascending=False))
 
-    print("\nMoyennes par Niveau d'éducation :")
+    print("\nMoyennes par Niveau d'éducation (Généré) :")
     print(dataset.groupby('Niveau_education')['Revenu_Annuel'].mean().sort_values(ascending=False))
 
     dataset.to_csv(FILENAME, index=False, encoding='utf-8')
